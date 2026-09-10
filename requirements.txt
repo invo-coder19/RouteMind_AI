@@ -1,0 +1,69 @@
+# =============================================================================
+# LLM Cost Autopilot — Python Dependencies
+# =============================================================================
+# Install inside an active virtual environment only:
+#   python -m venv venv
+#   venv\Scripts\activate          # Windows
+#   source venv/bin/activate       # macOS / Linux
+#   pip install --upgrade pip
+#   pip install -r requirements.txt --prefer-binary
+# =============================================================================
+
+# --- Core runtime ------------------------------------------------------------
+httpx==0.27.0                  # Async HTTP client for all provider calls
+pydantic==2.7.1                # Data validation and settings (v2)
+python-dotenv==1.0.1           # Load .env into os.environ
+
+# --- Retry / resilience ------------------------------------------------------
+tenacity==8.3.0                # Retry with exponential backoff
+
+# --- Data & ML (needed in later phases; pin now for reproducibility) ---------
+# pandas 2.2.3 ships proper Windows wheels for cp311/cp312/cp313.
+# numpy is NOT pinned explicitly — pandas and scikit-learn resolve a compatible
+# version with pre-built wheels automatically (numpy 2.x for Python 3.13).
+# Always install with: pip install -r requirements.txt --prefer-binary
+pandas==2.2.3                  # DataFrame → CSV for baseline_results.csv
+scikit-learn==1.5.2            # Complexity classifier baseline (Phase 2)
+lightgbm==4.3.0                # Upgraded classifier (Phase 2)
+
+# --- Evaluation (Phase 3) ----------------------------------------------------
+deepeval==0.21.73              # LLM evaluation framework
+
+# --- Dashboard (Phase 4) -----------------------------------------------------
+streamlit==1.35.0
+plotly==5.22.0
+
+# --- API server (Phase 5) ----------------------------------------------------
+fastapi==0.111.0
+uvicorn[standard]==0.30.1
+
+# --- Database (Phase 4) ------------------------------------------------------
+asyncpg==0.29.0                # Async Postgres driver
+sqlalchemy==2.0.30             # ORM / query builder (async mode)
+alembic==1.13.1                # DB migrations
+
+# --- Testing -----------------------------------------------------------------
+pytest==8.2.1
+pytest-asyncio==0.23.7
+httpx                          # Already pinned above; also used in tests
+
+# --- Core async HTTP ---------------------------------------------------------
+httpx==0.27.0              # Async HTTP client for all provider calls
+
+# --- Data validation ---------------------------------------------------------
+pydantic==2.7.1            # v2 — ModelConfig, LLMResponse
+
+# --- Environment / secrets ---------------------------------------------------
+python-dotenv==1.0.1       # Loads .env into os.environ
+
+# --- Retry / resilience ------------------------------------------------------
+tenacity==8.3.0            # Exponential backoff on 429 / 503
+
+# --- Data output (baseline_results.csv) --------------------------------------
+# pandas 2.2.3 ships cp311/cp312/cp313 Windows wheels — no source build needed.
+pandas==2.2.3
+
+# --- ML classifier (Phase 2 — pinned now for reproducibility) ----------------
+# Both packages ship cp313 Windows wheels; --prefer-binary ensures they're used.
+scikit-learn==1.5.2
+lightgbm==4.3.0
