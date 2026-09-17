@@ -1,0 +1,25 @@
+# =============================================================================
+# config/routing_map.yaml
+# =============================================================================
+# Maps each complexity tier (simple / moderate / complex) to a model_id that
+# must exist in models/registry.py MODEL_REGISTRY.
+#
+# Edit this file freely — no code changes needed to adjust routing.
+# The model_id values must exactly match the `model_id` field in registry.py.
+# =============================================================================
+
+routing:
+  # ─── Simple tier ───────────────────────────────────────────────────────────
+  # Factual lookups, definitions, basic Q&A.
+  # Local Ollama model — zero API cost.
+  simple: "llama3.2:3b"
+
+  # ─── Moderate tier ─────────────────────────────────────────────────────────
+  # Summaries, single-step reasoning, comparisons.
+  # Groq's Llama 3.1 8B — fast inference, low cost, hosted.
+  moderate: "llama-3.1-8b-instant"
+
+  # ─── Complex tier ──────────────────────────────────────────────────────────
+  # Multi-step reasoning, code generation, architecture design.
+  # Best available cloud model.
+  complex: "gemini-2.0-flash"

@@ -1,0 +1,32 @@
+prompt_text,complexity_label
+Design a fraud detection system for a financial platform. What features would you extract and what models would you use?,complex
+Compare SQL and NoSQL databases and explain when you would choose each.,moderate
+Who painted the Mona Lisa?,simple
+What is the freezing point of water in Fahrenheit?,simple
+Write a Python context manager that measures and logs the execution time of a code block.,complex
+Compare synchronous and asynchronous programming. When is async preferred?,moderate
+What is a race condition and how can you prevent it in multithreaded code?,moderate
+Who wrote 1984?,simple
+"Design a content moderation system for user-generated content at scale. Balance accuracy, speed, and appeals.",complex
+Implement a basic MapReduce framework in Python that can run word count on a large text file.,complex
+Describe the difference between concurrency and parallelism in programming.,moderate
+How does the human immune system respond to a bacterial infection?,moderate
+Design a chaos engineering experiment for a payment processing service. What failures would you inject and why?,complex
+What year did World War II end?,simple
+What is the difference between authentication and authorization?,moderate
+Explain how SSL/TLS certificates work.,moderate
+How many bytes are in a kilobyte?,simple
+How would you architect a real-time collaborative document editor? Explain the key components and challenges.,complex
+Implement a suffix array construction algorithm in Python for efficient substring search.,complex
+Write a SQL query to find the top 3 customers by revenue in each region using window functions.,complex
+Compare REST and GraphQL APIs and when would you choose one over the other?,moderate
+Write a Python function that efficiently finds all permutations of a string without using built-in permutation functions.,complex
+Define algorithm.,simple
+What is the boiling point of water in Celsius?,simple
+"Design a notification system that delivers messages to millions of users across email, SMS, and push channels.",complex
+What does VPN stand for?,simple
+Name the three branches of the US government.,simple
+What is 15% of 200?,simple
+Explain the CAP theorem and its implications for distributed systems.,moderate
+Implement Dijkstra shortest path algorithm in Python and explain the time complexity.,complex
+What is the difference between precision and recall in classification tasks?,moderate
