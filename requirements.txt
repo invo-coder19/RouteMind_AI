@@ -22,6 +22,9 @@ lightgbm==4.3.0                # Upgraded classifier (ships py3-none-win_amd64)
 # deepeval 4.2.2 ships py3-none-any; requires tenacity>=8.0.0,<=10.0.0 (compatible).
 deepeval==4.2.2                # LLM evaluation framework (Phase 3)
 
+# --- Async SQLite (Phase 3) --------------------------------------------------
+aiosqlite==0.20.0              # Non-blocking SQLite for verification/feedback_store.py
+
 # streamlit 1.45.0+ supports numpy 2.x (1.35.0 capped at numpy<2.0, preventing binary wheel use).
 streamlit==1.45.0
 plotly==5.24.1
