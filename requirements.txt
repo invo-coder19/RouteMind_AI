@@ -35,7 +35,8 @@ uvicorn[standard]==0.30.1
 
 # --- Database (Phase 4) -------------------------------------------------------
 # asyncpg 0.30.0 ships cp313-cp313-win_amd64 wheels (0.29.0 did not).
-asyncpg==0.30.0                # Async Postgres driver
+asyncpg==0.30.0                # Async Postgres driver (db/engine.py, db/logger.py)
+psycopg2-binary==2.9.9         # Sync Postgres driver (db/queries.py → pandas.read_sql_query)
 sqlalchemy==2.0.30             # ORM / query builder (async mode)
 alembic==1.13.1                # DB migrations
 

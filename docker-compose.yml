@@ -1,0 +1,43 @@
+# =============================================================================
+# docker-compose.yml — LLM Cost Autopilot local development stack
+# =============================================================================
+# Start the full stack:
+#   docker compose up -d
+#
+# Postgres is exposed on localhost:5432.
+# DATABASE_URL in .env should be:
+#   DATABASE_URL=postgresql+asyncpg://routemind:routemind@localhost:5432/routemind
+#
+# After first start, initialise the schema:
+#   python db/init_db.py
+# =============================================================================
+
+version: "3.9"
+
+services:
+  # ---------------------------------------------------------------------------
+  # Postgres — primary data store for Phase 4
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: routemind_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: routemind
+      POSTGRES_PASSWORD: routemind
+      POSTGRES_DB: routemind
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Auto-run schema.sql on first container creation
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U routemind -d routemind"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
+    driver: local
