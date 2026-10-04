@@ -1,31 +1,31 @@
 """
 dashboard/app.py
 ================
-LLM Cost Autopilot — Cost & Quality Dashboard (Phase 4).
+LLM Cost Autopilot — Cost & Quality Dashboard (Phase 4.2 — UI/UX Refinement).
 
 Run with:
     streamlit run dashboard/app.py
 
-What it shows (top to bottom)
-------------------------------
-1. Headline metric: total $ saved vs. baseline, and % savings
-2. Cost over time: daily line chart
-3. Routing distribution: pie + bar charts by tier and model
+Sections (top to bottom)
+-------------------------
+1. Headline: total $ saved vs. baseline — single dominant number
+2. Cost over time: actual vs. baseline dual line chart
+3. Routing distribution: donut (tier) + horizontal bar (model)
 4. Quality & escalation trend: dual-axis line chart
-5. Recent escalations table: spot-check real failures
+5. Recent escalations: sortable/scrollable st.dataframe
 
-Date-range filter at the top applies to all time-series charts.
+Theme is centralised in .streamlit/config.toml.
+All remaining hex codes here are CSS custom properties — one place to change.
 
-All data is read live from Postgres via db/queries.py.
-No mock or hardcoded data.
+Data contract: no changes to db/queries.py or its return shapes.
 """
 from __future__ import annotations
 
 import pathlib
 import sys
 
-import plotly.express as px
 import plotly.graph_objects as go
+import plotly.express as px
 import streamlit as st
 
 _PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -45,114 +45,287 @@ from db.queries import (  # noqa: E402
 # ---------------------------------------------------------------------------
 
 st.set_page_config(
-    page_title="LLM Cost Autopilot — Dashboard",
+    page_title="LLM Cost Autopilot",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
 
 # ---------------------------------------------------------------------------
-# Custom CSS — premium dark theme
+# Design tokens — kept in one block so colours are easy to update
+# ---------------------------------------------------------------------------
+# These mirror .streamlit/config.toml semantically.
+# Use these variables throughout; never paste hex inline below this block.
+
+BG          = "#0b0f1a"   # page background
+SURFACE     = "#131928"   # card / panel background
+SURFACE2    = "#1c2333"   # slightly raised (chart bg, row hover)
+BORDER      = "#1e2d40"   # subtle card border
+PRIMARY     = "#4ade80"   # green — savings, pass, positive
+PRIMARY_DIM = "#22c55e"   # darker green for fill / area
+DANGER      = "#f87171"   # red — escalation, baseline, negative
+ACCENT      = "#60a5fa"   # blue — spend, neutral metric
+PURPLE      = "#a78bfa"   # purple — request count
+TEXT        = "#f1f5f9"   # high-contrast body
+MUTED       = "#94a3b8"   # labels, captions
+GRID        = "#1a2236"   # chart gridlines
+
+# Chart colour sequences — consistent shades of the palette, not rainbows
+TIER_COLOURS = {
+    "simple":   PRIMARY,
+    "moderate": ACCENT,
+    "complex":  PURPLE,
+}
+TIER_SEQ = [PRIMARY, ACCENT, PURPLE]
+
+FONT = "Inter, system-ui, -apple-system, sans-serif"
+
+# ---------------------------------------------------------------------------
+# Global CSS — single <style> block, zero scattered markdown later
 # ---------------------------------------------------------------------------
 
 st.markdown(
-    """
+    f"""
     <style>
+    /* ── Google Fonts ─────────────────────────────────────────────── */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
-    html, body, [class*="css"] {
-        font-family: 'Inter', sans-serif;
-    }
-    .main { background-color: #0e1117; }
+    /* ── Reset / Base ─────────────────────────────────────────────── */
+    html, body, [class*="css"], .stApp {{
+        font-family: {FONT};
+        background-color: {BG};
+        color: {TEXT};
+    }}
 
-    /* Metric cards */
-    .metric-card {
-        background: linear-gradient(135deg, #1a1f2e 0%, #232b3e 100%);
-        border: 1px solid #2d3748;
-        border-radius: 12px;
-        padding: 24px 28px;
-        text-align: center;
-    }
-    .metric-value {
-        font-size: 2.8rem;
+    /* Hide Streamlit chrome */
+    #MainMenu, footer, header {{ visibility: hidden; }}
+    .block-container {{ padding: 2rem 2.5rem 3rem; max-width: 1400px; }}
+
+    /* ── Page header ──────────────────────────────────────────────── */
+    .page-title {{
+        font-size: 1.55rem;
         font-weight: 700;
-        color: #48bb78;
-        line-height: 1.1;
-    }
-    .metric-value.negative { color: #fc8181; }
-    .metric-label {
-        font-size: 0.85rem;
-        color: #a0aec0;
-        margin-top: 6px;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-    }
-    .metric-sub {
-        font-size: 1.1rem;
-        color: #68d391;
-        margin-top: 4px;
-        font-weight: 500;
-    }
+        color: {TEXT};
+        letter-spacing: -0.02em;
+        line-height: 1.2;
+        margin: 0 0 2px;
+    }}
+    .page-subtitle {{
+        font-size: 0.875rem;
+        color: {MUTED};
+        margin: 0 0 1.5rem;
+    }}
 
-    /* Section headers */
-    .section-header {
-        font-size: 1.1rem;
+    /* ── Section labels ───────────────────────────────────────────── */
+    .section-label {{
+        font-size: 0.7rem;
         font-weight: 600;
-        color: #e2e8f0;
-        padding: 8px 0 4px 0;
-        border-bottom: 2px solid #2d3748;
-        margin-bottom: 16px;
-    }
+        color: {MUTED};
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        margin: 0 0 0.35rem;
+    }}
+    .section-rule {{
+        border: none;
+        border-top: 1px solid {BORDER};
+        margin: 0 0 1.2rem;
+    }}
 
-    /* Streamlit overrides */
-    .stDataFrame { border-radius: 8px; overflow: hidden; }
-    div[data-testid="metric-container"] { background: #1a1f2e; border-radius: 10px; padding: 12px; }
+    /* ── Headline metric card ─────────────────────────────────────── */
+    .headline-card {{
+        background: {SURFACE};
+        border: 1px solid {BORDER};
+        border-radius: 14px;
+        padding: 22px 26px 18px;
+        position: relative;
+        transition: box-shadow 0.2s ease;
+    }}
+    .headline-card:hover {{
+        box-shadow: 0 0 0 1px {PRIMARY}33, 0 4px 24px rgba(0,0,0,0.4);
+    }}
+    .headline-card.primary {{
+        border-color: {PRIMARY}55;
+        background: linear-gradient(145deg, {SURFACE} 60%, {PRIMARY}08 100%);
+    }}
+    .card-super {{
+        font-size: 0.68rem;
+        font-weight: 600;
+        color: {MUTED};
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        margin-bottom: 6px;
+    }}
+    .card-value {{
+        font-size: 2.6rem;
+        font-weight: 700;
+        color: {PRIMARY};
+        line-height: 1.05;
+        letter-spacing: -0.03em;
+    }}
+    .card-value.neutral {{ color: {ACCENT}; }}
+    .card-value.purple  {{ color: {PURPLE}; }}
+    .card-value.negative {{ color: {DANGER}; }}
+    .card-sub {{
+        font-size: 0.82rem;
+        color: {MUTED};
+        margin-top: 5px;
+    }}
+    .card-trend {{
+        position: absolute;
+        top: 18px; right: 20px;
+        font-size: 0.78rem;
+        font-weight: 600;
+        padding: 2px 8px;
+        border-radius: 20px;
+        background: {PRIMARY}1a;
+        color: {PRIMARY};
+    }}
+    .card-trend.down {{
+        background: {DANGER}1a;
+        color: {DANGER};
+    }}
+
+    /* ── Filter pill row ──────────────────────────────────────────── */
+    div[data-testid="stSelectbox"] > div {{
+        background: {SURFACE} !important;
+        border: 1px solid {BORDER} !important;
+        border-radius: 8px !important;
+    }}
+
+    /* ── Dataframe ─────────────────────────────────────────────────  */
+    .stDataFrame {{
+        border-radius: 10px;
+        overflow: hidden;
+        border: 1px solid {BORDER};
+    }}
+
+    /* ── Empty state ──────────────────────────────────────────────── */
+    .empty-state {{
+        text-align: center;
+        padding: 48px 24px;
+        color: {MUTED};
+        font-size: 0.9rem;
+        background: {SURFACE};
+        border: 1px dashed {BORDER};
+        border-radius: 12px;
+    }}
+    .empty-state .icon {{
+        font-size: 2rem;
+        margin-bottom: 8px;
+    }}
+
+    /* ── Footer ───────────────────────────────────────────────────── */
+    .dash-footer {{
+        text-align: center;
+        color: {BORDER};
+        font-size: 0.73rem;
+        padding-top: 2rem;
+        border-top: 1px solid {BORDER};
+        margin-top: 2rem;
+    }}
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 # ---------------------------------------------------------------------------
-# Header
+# Shared Plotly layout helper
 # ---------------------------------------------------------------------------
 
-st.markdown("## ⚡ LLM Cost Autopilot")
+def _base_layout(**overrides) -> dict:
+    """Return a consistent Plotly layout dict for all charts."""
+    base = dict(
+        plot_bgcolor=SURFACE2,
+        paper_bgcolor="rgba(0,0,0,0)",
+        font=dict(color=MUTED, family=FONT, size=12),
+        margin=dict(l=4, r=4, t=36, b=4),
+        legend=dict(
+            orientation="h",
+            x=0,
+            y=1.12,
+            bgcolor="rgba(0,0,0,0)",
+            font=dict(size=11),
+        ),
+        xaxis=dict(
+            gridcolor=GRID,
+            linecolor=BORDER,
+            tickcolor=BORDER,
+            showgrid=True,
+            zeroline=False,
+        ),
+        yaxis=dict(
+            gridcolor=GRID,
+            linecolor=BORDER,
+            tickcolor=BORDER,
+            showgrid=True,
+            zeroline=False,
+        ),
+        hoverlabel=dict(
+            bgcolor=SURFACE,
+            bordercolor=BORDER,
+            font=dict(color=TEXT, family=FONT, size=12),
+        ),
+        height=310,
+    )
+    base.update(overrides)
+    return base
+
+
+# ── Section header helper ──────────────────────────────────────────────────
+
+def _section(label: str) -> None:
+    st.markdown(
+        f'<p class="section-label">{label}</p><hr class="section-rule">',
+        unsafe_allow_html=True,
+    )
+
+
+def _empty(msg: str, icon: str = "📭") -> None:
+    st.markdown(
+        f'<div class="empty-state"><div class="icon">{icon}</div>{msg}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Page header
+# ---------------------------------------------------------------------------
+
 st.markdown(
-    "<p style='color:#718096;margin-top:-8px;'>Live routing performance & cost savings dashboard</p>",
+    '<p class="page-title">⚡ LLM Cost Autopilot</p>'
+    '<p class="page-subtitle">Live routing performance &amp; cost savings — Postgres-backed, auto-refreshes every 2 min</p>',
     unsafe_allow_html=True,
 )
 
 # ---------------------------------------------------------------------------
-# Date-range filter (applies to all time-series charts)
+# Filter row — compact segmented-style control
 # ---------------------------------------------------------------------------
 
-col_filter1, col_filter2, _ = st.columns([1, 1, 4])
-with col_filter1:
-    days_back = st.selectbox(
+filter_col, _, _ = st.columns([1, 1, 4])
+with filter_col:
+    days_back: int = st.selectbox(
         "Time window",
         options=[7, 14, 30, 60, 90],
         index=2,
         format_func=lambda d: f"Last {d} days",
+        label_visibility="collapsed",
     )
 
-st.divider()
-
 # ---------------------------------------------------------------------------
-# Data loading — cached per time window
+# Data loading — cached per window, 2-min TTL
 # ---------------------------------------------------------------------------
 
-
-@st.cache_data(ttl=120, show_spinner="Loading data from database…")
+@st.cache_data(ttl=120, show_spinner="Fetching data…")
 def load_all_data(days: int) -> dict:
     """Load all dashboard data for the given time window."""
     try:
         return {
-            "baseline": get_baseline_comparison(),
-            "cost_time": get_cost_over_time(days=days),
-            "routing": get_routing_distribution(),
-            "quality": get_quality_metrics(days=days),
+            "baseline":    get_baseline_comparison(),
+            "cost_time":   get_cost_over_time(days=days),
+            "routing":     get_routing_distribution(),
+            "quality":     get_quality_metrics(days=days),
             "escalations": get_recent_escalations(limit=25),
-            "error": None,
+            "error":       None,
         }
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc)}
@@ -163,69 +336,76 @@ data = load_all_data(days_back)
 if data.get("error"):
     st.error(
         f"**Database connection failed:** {data['error']}\n\n"
-        "Make sure Postgres is running and `DATABASE_URL` is set in your `.env` file, "
-        "then run `python db/init_db.py` to create the tables."
+        "Check that Postgres is running and `DATABASE_URL` is set in `.env`, "
+        "then run `python db/init_db.py`."
     )
     st.stop()
 
-df_baseline = data["baseline"]
-df_cost = data["cost_time"]
-df_routing = data["routing"]
-df_quality = data["quality"]
+df_baseline    = data["baseline"]
+df_cost        = data["cost_time"]
+df_routing     = data["routing"]
+df_quality     = data["quality"]
 df_escalations = data["escalations"]
 
 # ---------------------------------------------------------------------------
-# 1. Headline metrics
+# 1. Headline metrics — largest element on the page
 # ---------------------------------------------------------------------------
 
-st.markdown('<div class="section-header">💰 Cost Savings vs. Baseline</div>', unsafe_allow_html=True)
+_section("COST SAVINGS OVERVIEW")
 
-total_actual = float(df_baseline["actual_cost"].sum()) if not df_baseline.empty else 0.0
+total_actual   = float(df_baseline["actual_cost"].sum())   if not df_baseline.empty else 0.0
 total_baseline = float(df_baseline["baseline_cost"].sum()) if not df_baseline.empty else 0.0
-total_savings = total_baseline - total_actual
-savings_pct = (total_savings / total_baseline * 100) if total_baseline > 0 else 0.0
-total_requests = int(df_cost["request_count"].sum()) if not df_cost.empty else 0
+total_savings  = total_baseline - total_actual
+savings_pct    = (total_savings / total_baseline * 100)    if total_baseline > 0 else 0.0
+total_requests = int(df_cost["request_count"].sum())       if not df_cost.empty else 0
 
-value_class = "metric-value" if total_savings >= 0 else "metric-value negative"
+# ── Trend indicator (half-period comparison) ──────────────────────────────
+# TODO: get_baseline_comparison() returns all-time aggregates, not period-split.
+# A per-period trend indicator requires a split query. Mark as TODO until
+# get_baseline_comparison() supports a `days` param.
+_savings_trend_html = ""  # placeholder — no fabricated trend
 
-col1, col2, col3, col4 = st.columns(4)
+h1, h2, h3, h4 = st.columns(4, gap="small")
 
-with col1:
+with h1:
+    v_class = "card-value" if total_savings >= 0 else "card-value negative"
     st.markdown(
-        f"""<div class="metric-card">
-            <div class="{value_class}">${total_savings:,.4f}</div>
-            <div class="metric-label">Total Saved (All Time)</div>
-            <div class="metric-sub">vs. all-premium routing</div>
+        f"""<div class="headline-card primary">
+            <div class="card-super">Total Saved (All Time)</div>
+            <div class="{v_class}">${total_savings:,.4f}</div>
+            <div class="card-sub">vs. routing everything to premium tier</div>
+            {_savings_trend_html}
         </div>""",
         unsafe_allow_html=True,
     )
 
-with col2:
+with h2:
+    v_class = "card-value" if savings_pct >= 0 else "card-value negative"
     st.markdown(
-        f"""<div class="metric-card">
-            <div class="{value_class}">{savings_pct:.1f}%</div>
-            <div class="metric-label">Cost Reduction</div>
-            <div class="metric-sub">vs. baseline model</div>
+        f"""<div class="headline-card">
+            <div class="card-super">Cost Reduction</div>
+            <div class="{v_class}">{savings_pct:.1f}%</div>
+            <div class="card-sub">vs. all-premium baseline</div>
         </div>""",
         unsafe_allow_html=True,
     )
 
-with col3:
+with h3:
     st.markdown(
-        f"""<div class="metric-card">
-            <div class="metric-value" style="color:#63b3ed;">${total_actual:,.4f}</div>
-            <div class="metric-label">Actual Spend</div>
-            <div class="metric-sub">smart routing applied</div>
+        f"""<div class="headline-card">
+            <div class="card-super">Actual Spend</div>
+            <div class="card-value neutral">${total_actual:,.4f}</div>
+            <div class="card-sub">smart routing applied</div>
         </div>""",
         unsafe_allow_html=True,
     )
 
-with col4:
+with h4:
     st.markdown(
-        f"""<div class="metric-card">
-            <div class="metric-value" style="color:#a78bfa;">{total_requests:,}</div>
-            <div class="metric-label">Total Requests</div>
-            <div class="metric-sub">last {days_back} days</div>
+        f"""<div class="headline-card">
+            <div class="card-super">Requests — last {days_back}d</div>
+            <div class="card-value purple">{total_requests:,}</div>
+            <div class="card-sub">routed by classifier</div>
         </div>""",
         unsafe_allow_html=True,
     )
@@ -236,53 +416,50 @@ st.markdown("<br>", unsafe_allow_html=True)
 # 2. Cost over time
 # ---------------------------------------------------------------------------
 
-st.markdown('<div class="section-header">📈 Cost Over Time</div>', unsafe_allow_html=True)
+_section("COST OVER TIME")
 
 if df_cost.empty:
-    st.info("No request data found for the selected time window.")
+    _empty("No request data for this time window.", "📉")
 else:
-    # Merge with baseline for the same date range
-    df_cost_merged = df_cost.copy()
+    df_cm = df_cost.copy()
     if not df_baseline.empty:
-        df_cost_merged = df_cost_merged.merge(
-            df_baseline[["date", "baseline_cost"]],
-            on="date",
-            how="left",
-        )
-        df_cost_merged["baseline_cost"] = df_cost_merged["baseline_cost"].fillna(0)
+        df_cm = df_cm.merge(df_baseline[["date", "baseline_cost"]], on="date", how="left")
+        df_cm["baseline_cost"] = df_cm["baseline_cost"].fillna(0)
 
     fig_cost = go.Figure()
+
+    # Area fill for actual — subtle green fill
     fig_cost.add_trace(go.Scatter(
-        x=df_cost_merged["date"],
-        y=df_cost_merged["total_cost"],
+        x=df_cm["date"],
+        y=df_cm["total_cost"],
         name="Actual cost",
         mode="lines+markers",
-        line=dict(color="#48bb78", width=2.5),
-        marker=dict(size=5),
+        line=dict(color=PRIMARY, width=2),
+        marker=dict(size=4, color=PRIMARY),
         fill="tozeroy",
-        fillcolor="rgba(72,187,120,0.08)",
+        fillcolor=f"{PRIMARY}12",
+        hovertemplate="<b>%{x|%b %d}</b><br>Actual: $%{y:.4f}<extra></extra>",
     ))
-    if "baseline_cost" in df_cost_merged.columns:
+
+    if "baseline_cost" in df_cm.columns:
         fig_cost.add_trace(go.Scatter(
-            x=df_cost_merged["date"],
-            y=df_cost_merged["baseline_cost"],
-            name="Baseline (all premium)",
+            x=df_cm["date"],
+            y=df_cm["baseline_cost"],
+            name="Baseline (all-premium)",
             mode="lines",
-            line=dict(color="#fc8181", width=2, dash="dash"),
+            line=dict(color=DANGER, width=1.5, dash="dash"),
+            hovertemplate="<b>%{x|%b %d}</b><br>Baseline: $%{y:.4f}<extra></extra>",
         ))
+
     fig_cost.update_layout(
-        plot_bgcolor="#0e1117",
-        paper_bgcolor="#0e1117",
-        font=dict(color="#a0aec0", family="Inter"),
-        legend=dict(orientation="h", y=1.08, x=0),
-        margin=dict(l=0, r=0, t=30, b=0),
-        yaxis=dict(
-            title="Cost (USD)",
-            gridcolor="#1a1f2e",
-            tickformat="$.4f",
-        ),
-        xaxis=dict(gridcolor="#1a1f2e"),
-        height=320,
+        **_base_layout(
+            yaxis=dict(
+                title="USD",
+                gridcolor=GRID,
+                tickformat="$.4f",
+                tickfont=dict(size=11),
+            ),
+        )
     )
     st.plotly_chart(fig_cost, use_container_width=True)
 
@@ -290,62 +467,82 @@ else:
 # 3. Routing distribution
 # ---------------------------------------------------------------------------
 
-st.markdown('<div class="section-header">🗂️ Routing Distribution</div>', unsafe_allow_html=True)
+_section("ROUTING DISTRIBUTION")
 
 if df_routing.empty:
-    st.info("No routing data available.")
+    _empty("No routing data yet.", "🗂️")
 else:
-    col_pie, col_bar = st.columns(2)
+    c_donut, c_bar = st.columns(2, gap="medium")
 
-    with col_pie:
-        # Tier-level pie
+    with c_donut:
         tier_agg = (
             df_routing.groupby("complexity_tier")["request_count"]
             .sum()
             .reset_index()
         )
-        fig_pie = px.pie(
-            tier_agg,
-            values="request_count",
-            names="complexity_tier",
-            title="By Complexity Tier",
-            color_discrete_sequence=["#48bb78", "#63b3ed", "#a78bfa"],
-            hole=0.45,
+        # Consistent tier ordering
+        tier_order = ["simple", "moderate", "complex"]
+        tier_agg["_order"] = tier_agg["complexity_tier"].map(
+            {t: i for i, t in enumerate(tier_order)}
         )
-        fig_pie.update_layout(
-            plot_bgcolor="#0e1117",
-            paper_bgcolor="#0e1117",
-            font=dict(color="#a0aec0", family="Inter"),
-            margin=dict(l=0, r=0, t=40, b=0),
-            height=320,
-            showlegend=True,
-            legend=dict(orientation="v"),
-        )
-        st.plotly_chart(fig_pie, use_container_width=True)
+        tier_agg = tier_agg.sort_values("_order").drop(columns="_order")
 
-    with col_bar:
-        # Model-level bar
-        fig_bar = px.bar(
-            df_routing.sort_values("request_count", ascending=True),
-            x="request_count",
-            y="model_id_used",
-            orientation="h",
-            title="By Model",
-            color="complexity_tier",
-            color_discrete_map={
-                "simple": "#48bb78",
-                "moderate": "#63b3ed",
-                "complex": "#a78bfa",
-            },
-            labels={"request_count": "Requests", "model_id_used": "Model"},
+        fig_donut = go.Figure(go.Pie(
+            labels=tier_agg["complexity_tier"],
+            values=tier_agg["request_count"],
+            hole=0.55,
+            marker=dict(
+                colors=[TIER_COLOURS.get(t, ACCENT) for t in tier_agg["complexity_tier"]],
+                line=dict(color=SURFACE, width=2),
+            ),
+            textfont=dict(color=TEXT, size=12),
+            hovertemplate="<b>%{label}</b><br>%{value:,} requests (%{percent})<extra></extra>",
+        ))
+        fig_donut.update_layout(
+            **_base_layout(
+                title=dict(text="By Complexity Tier", font=dict(size=13, color=MUTED), x=0.01),
+                showlegend=True,
+                xaxis=dict(visible=False),
+                yaxis=dict(visible=False),
+                height=300,
+            )
         )
+        # Donut centre annotation
+        total_r = tier_agg["request_count"].sum()
+        fig_donut.add_annotation(
+            text=f"<b>{total_r:,}</b><br><span style='font-size:10px'>total</span>",
+            x=0.5, y=0.5,
+            showarrow=False,
+            font=dict(size=15, color=TEXT, family=FONT),
+            align="center",
+        )
+        st.plotly_chart(fig_donut, use_container_width=True)
+
+    with c_bar:
+        df_sorted = df_routing.sort_values("request_count", ascending=True)
+        fig_bar = go.Figure()
+
+        for tier in tier_order:
+            subset = df_sorted[df_sorted["complexity_tier"] == tier]
+            if subset.empty:
+                continue
+            fig_bar.add_trace(go.Bar(
+                y=subset["model_id_used"],
+                x=subset["request_count"],
+                name=tier.capitalize(),
+                orientation="h",
+                marker_color=TIER_COLOURS.get(tier, ACCENT),
+                hovertemplate=f"<b>%{{y}}</b><br>{tier}: %{{x:,}} reqs<extra></extra>",
+            ))
+
         fig_bar.update_layout(
-            plot_bgcolor="#0e1117",
-            paper_bgcolor="#0e1117",
-            font=dict(color="#a0aec0", family="Inter"),
-            margin=dict(l=0, r=0, t=40, b=0),
-            height=320,
-            legend_title_text="Tier",
+            **_base_layout(
+                title=dict(text="By Model", font=dict(size=13, color=MUTED), x=0.01),
+                barmode="stack",
+                xaxis=dict(title="Requests", gridcolor=GRID, tickformat=","),
+                yaxis=dict(gridcolor="rgba(0,0,0,0)", tickfont=dict(size=11)),
+                height=300,
+            )
         )
         st.plotly_chart(fig_bar, use_container_width=True)
 
@@ -353,95 +550,104 @@ else:
 # 4. Quality & escalation trend
 # ---------------------------------------------------------------------------
 
-st.markdown('<div class="section-header">🎯 Quality & Escalation Trend</div>', unsafe_allow_html=True)
+_section("QUALITY & ESCALATION TREND")
 
 if df_quality.empty:
-    st.info("No verification data found. Run some requests through the verification loop first.")
+    _empty("Run requests through the verification loop to see quality data here.", "🎯")
 else:
-    fig_quality = go.Figure()
+    fig_q = go.Figure()
 
-    # Primary axis: avg quality score
-    fig_quality.add_trace(go.Scatter(
+    # Primary y — quality score (green)
+    fig_q.add_trace(go.Scatter(
         x=df_quality["date"],
         y=df_quality["avg_quality"],
         name="Avg Quality Score",
         mode="lines+markers",
-        line=dict(color="#48bb78", width=2.5),
-        marker=dict(size=5),
+        line=dict(color=PRIMARY, width=2),
+        marker=dict(size=4, color=PRIMARY),
         yaxis="y1",
+        hovertemplate="<b>%{x|%b %d}</b><br>Quality: %{y:.3f}<extra></extra>",
     ))
 
-    # Secondary axis: escalation rate %
-    fig_quality.add_trace(go.Scatter(
+    # Secondary y — escalation rate (red, dashed)
+    fig_q.add_trace(go.Scatter(
         x=df_quality["date"],
         y=df_quality["escalation_rate"],
-        name="Escalation Rate (%)",
+        name="Escalation Rate %",
         mode="lines+markers",
-        line=dict(color="#fc8181", width=2, dash="dot"),
-        marker=dict(size=5, symbol="diamond"),
+        line=dict(color=DANGER, width=1.5, dash="dot"),
+        marker=dict(size=4, symbol="diamond", color=DANGER),
         yaxis="y2",
+        hovertemplate="<b>%{x|%b %d}</b><br>Escalation: %{y:.1f}%<extra></extra>",
     ))
 
-    fig_quality.update_layout(
-        plot_bgcolor="#0e1117",
-        paper_bgcolor="#0e1117",
-        font=dict(color="#a0aec0", family="Inter"),
-        legend=dict(orientation="h", y=1.08, x=0),
-        margin=dict(l=0, r=0, t=30, b=0),
-        height=320,
-        yaxis=dict(
-            title="Avg Quality Score",
-            gridcolor="#1a1f2e",
-            range=[0, 1.05],
-            tickformat=".2f",
-        ),
-        yaxis2=dict(
-            title="Escalation Rate (%)",
-            overlaying="y",
-            side="right",
-            gridcolor="#1a1f2e",
-            range=[0, 100],
-            tickformat=".1f",
-        ),
-        xaxis=dict(gridcolor="#1a1f2e"),
+    fig_q.update_layout(
+        **_base_layout(
+            yaxis=dict(
+                title="Quality Score",
+                gridcolor=GRID,
+                range=[0, 1.05],
+                tickformat=".2f",
+                tickfont=dict(size=11),
+            ),
+            yaxis2=dict(
+                title="Escalation %",
+                overlaying="y",
+                side="right",
+                gridcolor="rgba(0,0,0,0)",
+                range=[0, 100],
+                tickformat=".0f",
+                ticksuffix="%",
+                tickfont=dict(size=11),
+            ),
+        )
     )
-    st.plotly_chart(fig_quality, use_container_width=True)
+    st.plotly_chart(fig_q, use_container_width=True)
 
 # ---------------------------------------------------------------------------
-# 5. Recent escalations table
+# 5. Recent escalations — sortable, scrollable, column-configured
 # ---------------------------------------------------------------------------
 
-st.markdown('<div class="section-header">🚨 Recent Escalations (System Self-Corrections)</div>', unsafe_allow_html=True)
+_section("RECENT ESCALATIONS — SYSTEM SELF-CORRECTIONS")
 
 if df_escalations.empty:
-    st.success(
-        "No escalations recorded. The cheap model is meeting quality standards — or "
-        "verification hasn't run yet."
+    _empty(
+        "No escalations on record. The router's cheap models are meeting quality standards "
+        "— or the verification loop hasn't processed requests yet.",
+        "✅",
     )
 else:
-    # Format for display
-    display_df = df_escalations.copy()
-    display_df["timestamp"] = display_df["timestamp"].dt.strftime("%Y-%m-%d %H:%M UTC")
-    display_df["quality_score"] = display_df["quality_score"].apply(lambda x: f"{x:.3f}")
-    display_df = display_df.rename(columns={
-        "timestamp": "Time",
-        "complexity_tier": "Tier",
-        "model_id_used": "Cheap Model",
+    disp = df_escalations.copy()
+    disp["timestamp"] = disp["timestamp"].dt.strftime("%Y-%m-%d %H:%M")
+    # Keep quality_score numeric so ProgressColumn works
+    disp = disp.rename(columns={
+        "timestamp":          "Time (UTC)",
+        "complexity_tier":    "Tier",
+        "model_id_used":      "Cheap Model",
         "reference_model_id": "Reference Model",
-        "quality_score": "Score",
-        "judge_justification": "Judge Note",
-        "prompt_preview": "Prompt (preview)",
+        "quality_score":      "Quality Score",
+        "judge_justification":"Judge Note",
+        "prompt_preview":     "Prompt",
     })
-    display_df = display_df.drop(columns=["request_id"], errors="ignore")
+    disp = disp.drop(columns=["request_id"], errors="ignore")
 
     st.dataframe(
-        display_df,
+        disp,
         use_container_width=True,
         hide_index=True,
+        height=340,
         column_config={
-            "Score": st.column_config.ProgressColumn(
-                "Score", min_value=0.0, max_value=1.0, format="%.3f"
+            "Quality Score": st.column_config.ProgressColumn(
+                "Quality Score",
+                min_value=0.0,
+                max_value=1.0,
+                format="%.3f",
+                width="small",
             ),
+            "Tier": st.column_config.TextColumn("Tier", width="small"),
+            "Time (UTC)": st.column_config.TextColumn("Time (UTC)", width="medium"),
+            "Prompt": st.column_config.TextColumn("Prompt", width="large"),
+            "Judge Note": st.column_config.TextColumn("Judge Note", width="large"),
         },
     )
 
@@ -449,10 +655,10 @@ else:
 # Footer
 # ---------------------------------------------------------------------------
 
-st.divider()
 st.markdown(
-    "<p style='text-align:center;color:#4a5568;font-size:0.78rem;'>"
-    "LLM Cost Autopilot · Phase 4 Dashboard · Data refreshes every 2 minutes"
-    "</p>",
+    f'<div class="dash-footer">LLM Cost Autopilot &nbsp;·&nbsp; '
+    f'Phase 4.2 Dashboard &nbsp;·&nbsp; '
+    f'Data cached for 2 minutes &nbsp;·&nbsp; '
+    f'Postgres live</div>',
     unsafe_allow_html=True,
 )

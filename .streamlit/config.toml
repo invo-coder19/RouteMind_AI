@@ -1,0 +1,32 @@
+# .streamlit/config.toml
+# ======================
+# Centralised Streamlit theme for LLM Cost Autopilot.
+# All hex values here are the single source of truth —
+# dashboard/app.py references these semantically via CSS variables
+# so hex codes don't scatter through the Python code.
+#
+# Color palette: deep navy dark mode, green accent.
+# -------------------------------------------------------
+#   Background    : #0b0f1a  (near-black navy)
+#   Surface       : #131928  (card/panel surface)
+#   Surface-2     : #1c2333  (slightly raised surface)
+#   Primary       : #4ade80  (green — savings, positive)
+#   Primary-dim   : #22c55e  (slightly darker green)
+#   Danger        : #f87171  (escalations, negative)
+#   Text-primary  : #f1f5f9  (high-contrast body text)
+#   Text-muted    : #94a3b8  (labels, captions)
+#   Border        : #1e2d40  (subtle card borders)
+
+[theme]
+base              = "dark"
+primaryColor      = "#4ade80"
+backgroundColor   = "#0b0f1a"
+secondaryBackgroundColor = "#131928"
+textColor         = "#f1f5f9"
+font              = "sans serif"
+
+[server]
+headless = true
+
+[browser]
+gatherUsageStats = false
