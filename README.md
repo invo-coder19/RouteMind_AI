@@ -1,131 +1,253 @@
-# RouteMind AI
-### Autonomous Multi-LLM Inference Routing & Cost Optimization Platform
+# LLM Cost Autopilot
 
-[![Python](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
-[![Pydantic](https://img.shields.io/badge/Pydantic-v2-e92063.svg)](https://docs.pydantic.dev/)
-[![License](https://img.shields.io/badge/License-MIT%20%2F%20Apache-green.svg)](LICENSE)
+> **Stop routing every request to your most expensive model.**  
+> LLM Cost Autopilot is an intelligent routing layer that classifies each incoming prompt by complexity, dispatches it to the cheapest capable model, asynchronously verifies quality against a reference model, and self-corrects when cheaper models underperform — all behind a single OpenAI-compatible API endpoint.
 
 ---
 
-## Overview
+## Architecture
 
-<div align="justify">
-The Autonomous Multi-LLM Inference Routing and Cost Optimization Platform (<strong>RouteMind AI</strong>) is an intelligent infrastructure solution designed to optimize Large Language Model (LLM) inference by autonomously selecting the most suitable model for each incoming request. The platform dramatically reduces operational expenditure while preserving response quality through autonomous inference routing, prompt complexity analysis, and continuous post-inference quality validation.
-</div>
+```mermaid
+flowchart LR
+    Client -->|POST /v1/completions| API[FastAPI\napi/main.py]
+    API --> Classifier[Phase 2\nComplexity Classifier\nRandomForest]
+    Classifier -->|tier| Router[Phase 1\nRouter Client\nsend_request]
+    Router -->|cheap model| LLM[(LLM Provider\nGroq / Ollama /\nGemini / Mistral)]
+    LLM -->|LLMResponse| API
+    API -->|immediate response| Client
 
-<br/>
+    API -.->|BackgroundTask| VerifyLoop[Phase 3\nVerification Loop]
+    VerifyLoop --> RefModel[(Reference Model\nhigh quality_tier)]
+    VerifyLoop --> Judge[LLM-as-Judge\nquality score]
+    VerifyLoop --> Escalation[Escalation\nDecision]
+    VerifyLoop --> DB[(PostgreSQL\nrequest_log\nverification_log)]
 
-<div align="justify">
-Architected as a provider-agnostic routing layer, RouteMind AI abstracts the underlying APIs of major commercial cloud providers (OpenRouter, Groq, Google Gemini, Mistral AI) as well as locally hosted inference engines (Ollama). This delivers a single, unified interface that enables cost-effective resource utilization across diverse generative AI workloads.
-</div>
-
----
-
-## Problem Statement
-
-<div align="justify">
-Organizations increasingly rely on Large Language Models to power enterprise applications, search engines, code assistants, and automated workflows. However, the standard architectural pattern—routing every prompt to high-capability, premium frontier models—introduces substantial operational overhead, inflated inference latency, and wasteful computational allocation for mundane queries.
-</div>
-
-<br/>
-
-<div align="justify">
-Existing model gateways provide limited dynamic model selection based on prompt complexity and typically lack automated mechanisms for continuous quality validation and adaptive routing. An intelligent routing layer is required to autonomously identify the most cost-effective language model capable of satisfying user-defined quality thresholds, while continually refining its routing decisions through ongoing empirical feedback.
-</div>
-
----
-
-## Objectives
-
-<div align="justify">
-The core engineering and research objectives of RouteMind AI include:
-</div>
-
-<div align="justify">
-<ul>
-  <li><strong>Unified Provider Abstraction:</strong> Design and implement a provider-agnostic async client capable of dispatching inference requests seamlessly across heterogeneous cloud APIs and local inference engines.</li>
-  <li><strong>Autonomous Inference Routing:</strong> Eliminate the manual selection of model endpoints by automatically routing prompts based on real-time task complexity and quality constraints.</li>
-  <li><strong>Prompt Complexity Classification:</strong> Categorize incoming queries (simple factual lookups, structured summaries, classification, or multi-step reasoning) prior to model invocation.</li>
-  <li><strong>Cost Optimization:</strong> Minimize unnecessary usage of expensive frontier models by delegating low- and mid-complexity queries to high-throughput, low-cost alternatives.</li>
-  <li><strong>Automated Quality Validation:</strong> Routinely benchmark and evaluate model outputs to verify that routed responses maintain parity with frontier model baselines.</li>
-  <li><strong>Adaptive Learning:</strong> Ingest latency, token consumption, and quality validation scores into continuous feedback loops to adaptively calibrate future routing thresholds.</li>
-  <li><strong>Extensible Architecture:</strong> Provide an open, decoupled architecture allowing rapid integration of emerging model providers and custom fine-tunes with zero breaking changes.</li>
-</ul>
-</div>
-
----
-
-## System Architecture
-
+    DB --> Dashboard[Phase 4\nStreamlit Dashboard\ndashboard/app.py]
 ```
-                                      [ Incoming User Request / Prompt ]
-                                                      │
-                                                      ▼
-                                      ┌────────────────────────────────┐
-                                      │   Prompt Complexity Analyzer   │  (Phase 2)
-                                      │   (Simple / Moderate / Complex)│
-                                      └───────────────┬────────────────┘
-                                                      │
-                                                      ▼
-                                      ┌────────────────────────────────┐
-                                      │   Autonomous Model Router      │  (Phase 3)
-                                      │   (Tier Matching & Policies)   │
-                                      └───────────────┬────────────────┘
-                                                      │
-                                                      ▼
-                               ┌──────────────────────────────────────────────┐
-                               │       core.router_client (send_request)      │  (Phase 1)
-                               └──────┬───────┬────────┬───────┬────────┬─────┘
-                                      │       │        │       │        │
-                   ┌──────────────────┘       │        │       │        └──────────────────┐
-                   ▼                          ▼        ▼       ▼                           ▼
-          ┌──────────────────┐          ┌──────────┐ ┌──────┐ ┌─────────┐          ┌──────────────┐
-          │    OpenRouter    │          │   Groq   │ │Gemini│ │ Mistral │          │ Ollama Local │
-          │(Claude, Gemini-8B│          │(Llama 3.1│ │(Flash│ │(Small 4)│          │(Gemma, Llama)│
-          └────────┬─────────┘          └────┬─────┘ └──┬───┘ └────┬────┘          └──────┬───────┘
-                   │                         │          │          │                      │
-                   └──────────────────┬──────┴──────────┴──────────┴──────────────────────┘
-                                      │
-                                      ▼
-                        ┌───────────────────────────┐
-                        │   Unified LLMResponse     │
-                        │ ───────────────────────── │
-                        │ • output_text: str        │
-                        │ • input_tokens: int       │
-                        │ • output_tokens: int      │
-                        │ • latency_ms: float       │
-                        │ • cost_usd: float         │
-                        │ • model_id & provider     │
-                        └─────────────┬─────────────┘
-                                      │
-                   ┌──────────────────┴──────────────────┐
-                   ▼                                     ▼
-        [ Return to Caller ]                [ Background Evaluation Engine ]
-        (Immediate Response)                (DeepEval Quality & Drift Check)
+
+---
+
+## Quick Start
+
+### 1. Prerequisites
+
+- Python 3.11+
+- Docker & Docker Compose
+- [Ollama](https://ollama.ai) running locally (`ollama pull llama3.2:3b`)
+- API keys for at least one cloud provider (Groq is free)
+
+### 2. Environment setup
+
+```bash
+# Clone and enter
+git clone https://github.com/invo-coder19/RouteMind_AI.git
+cd RouteMind_AI
+
+# Create venv
+python -m venv .venv
+.venv\Scripts\activate          # Windows
+# source .venv/bin/activate     # macOS/Linux
+
+pip install -r requirements.txt
 ```
+
+### 3. Configure API keys
+
+Copy `.env` and fill in your keys:
+
+```bash
+# .env
+OPENROUTER_API_KEY=your_key_here
+GROQ_API_KEY=your_key_here
+GEMINI_API_KEY=your_key_here
+MISTRAL_API_KEY=your_key_here
+OLLAMA_BASE_URL=http://localhost:11434
+DATABASE_URL=postgresql+asyncpg://routemind:routemind@localhost:5432/routemind
+
+# Optional: set this to require X-API-Key on write endpoints
+# API_KEY=your_secret_key
+```
+
+### 4. Train the classifier (Phase 2)
+
+```bash
+python data/split_dataset.py
+python classifier/train.py
+```
+
+### 5. Start the full stack
+
+```bash
+docker compose up --build
+```
+
+This starts:
+- **Postgres** on port 5432 (schema applied automatically)
+- **FastAPI API** on port 8000
+- **Streamlit Dashboard** on port 8501
+
+> **Linux users:** Uncomment `extra_hosts: host.docker.internal:host-gateway` in `docker-compose.yml` so the API container can reach Ollama on your host.
+
+### 6. Verify
+
+```bash
+curl http://localhost:8000/health
+# {"status":"ok","classifier_loaded":true,"db_connected":true}
+```
+
+---
+
+## API Reference
+
+Base URL: `http://localhost:8000`  
+Interactive docs: `http://localhost:8000/docs`
+
+### `POST /v1/completions`
+
+Route a prompt to the cheapest capable model.
+
+```bash
+curl -X POST http://localhost:8000/v1/completions \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "What is the capital of France?"}'
+```
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `prompt` | string | ✅ | The user's prompt |
+| `system_prompt` | string | ❌ | Optional system instruction |
+| `max_tokens` | int | ❌ | Max tokens (default: 1024) |
+| `force_model` | string | ❌ | Bypass classifier; use a specific model_id |
+
+**Response:**
+
+```json
+{
+  "output_text": "Paris.",
+  "model_used": "llama3.2:3b",
+  "provider": "ollama",
+  "complexity_tier": "simple",
+  "input_tokens": 8,
+  "output_tokens": 4,
+  "cost_usd": 0.0,
+  "latency_ms": 312.5,
+  "request_id": "b3f2e...",
+  "fallback_used": false
+}
+```
+
+### `GET /v1/models`
+
+List all registered models with pricing.
+
+```bash
+curl http://localhost:8000/v1/models
+```
+
+### `GET /v1/stats`
+
+Headline savings and quality metrics.
+
+```bash
+curl http://localhost:8000/v1/stats
+```
+
+### `GET /v1/routing-config`
+
+Current tier → model_id mapping.
+
+### `PUT /v1/routing-config`
+
+Hot-reload routing without restarting the API.
+
+```bash
+curl -X PUT http://localhost:8000/v1/routing-config \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your_key" \
+  -d '{"routing": {"simple": "llama3.2:3b", "moderate": "llama-3.1-8b-instant", "complex": "gemini-2.0-flash"}}'
+```
+
+### `GET /health`
+
+Liveness + readiness probe (used by Docker).
+
+---
+
+## Load Test
+
+```bash
+# Run both smart-routing and baseline (100 requests each — adjust as needed)
+python scripts/load_test.py --mode both --requests 500
+```
+
+Results are written to `load_test_report.md`.
+
+---
+
+## Dashboard
+
+Open `http://localhost:8501` after `docker compose up`.
+
+Sections:
+- 💰 **Cost savings** vs. all-premium baseline (headline metric)
+- 📈 **Cost over time** — actual vs. baseline
+- 🗂️ **Routing distribution** — tier and model breakdown
+- 🎯 **Quality trend** — judge score + escalation rate
+- 🚨 **Recent escalations** — system self-corrections, spot-checkable
+
+---
+
+## Project Structure
 
 ```
 RouteMind_AI/
-├── .env.example              # Template for API credentials and local endpoint URLs
-├── .gitignore                # Git exclusion rules (virtual environments, credentials, caches)
-├── LICENSE                   # Project license
-├── README.md                 # Project documentation and setup guide
-├── requirements.txt          # Pinned runtime dependencies
-├── core/                     # Core routing and client modules
-│   ├── __init__.py
-│   ├── exceptions.py         # ProviderError and exception abstractions
-│   └── router_client.py      # Async client dispatcher with tenacity retries
-├── models/                   # Data schemas and model registry
-│   ├── __init__.py
-│   ├── registry.py           # ModelConfig, MODEL_REGISTRY, get_model(), list_models_by_tier()
-│   └── response.py           # LLMResponse Pydantic v2 data model
-├── scripts/                  # Benchmarking and operational utilities
-│   └── baseline_test.py      # 10-prompt cross-provider benchmark & CSV generator
-└── venv/                     # Python virtual environment (ignored in version control)
+├── api/              # Phase 5 — FastAPI application
+│   ├── main.py       # App + lifespan + middleware
+│   ├── dependencies.py
+│   └── routes/       # completions, health, models, stats, routing_config
+├── classifier/       # Phase 2 — Complexity classifier
+├── config/           # routing_map.yaml
+├── core/             # Phase 1 — Provider clients, exceptions
+├── dashboard/        # Phase 4 — Streamlit dashboard
+├── data/             # Labeled prompts, train/test splits
+├── db/               # Phase 4 — Postgres schema, ORM, logger, queries
+├── docs/             # Case study
+├── models/           # ModelConfig, MODEL_REGISTRY
+├── scripts/          # retrain_classifier.py, load_test.py
+├── tests/            # pytest suite
+├── verification/     # Phase 3 — Quality verification & feedback loop
+├── Dockerfile
+├── docker-compose.yml
+└── requirements.txt
 ```
 
-## Contributors
+---
 
-- **Soham Deshpande**
-- **Riya Gandhi**
-- **Avdhut Giri**
+## Headline Result
+
+<!-- TODO: Fill in after running `python scripts/load_test.py --mode both --requests 500` -->
+
+| Metric | Value |
+|---|---|
+| Gross cost savings | `[run load test]` |
+| Net savings (after verification) | `[run load test]` |
+| Avg quality score | `[run load test]` |
+| Escalation rate | `[run load test]` |
+
+---
+
+## Running Tests
+
+```bash
+pytest tests/ -v
+```
+
+All provider calls are mocked — no API spend during tests.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).

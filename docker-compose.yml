@@ -1,24 +1,38 @@
 # =============================================================================
-# docker-compose.yml — LLM Cost Autopilot local development stack
+# docker-compose.yml — LLM Cost Autopilot full stack
 # =============================================================================
-# Start the full stack:
-#   docker compose up -d
+# Start everything with one command:
+#   docker compose up --build
 #
-# Postgres is exposed on localhost:5432.
-# DATABASE_URL in .env should be:
-#   DATABASE_URL=postgresql+asyncpg://routemind:routemind@localhost:5432/routemind
+# Services:
+#   db        — Postgres 16 (primary data store)
+#   api       — FastAPI service (Phase 5)
+#   dashboard — Streamlit dashboard (Phase 4)
 #
-# After first start, initialise the schema:
-#   python db/init_db.py
+# Ollama runs on the HOST machine (not in Docker).
+# The API container reaches it via:
+#   OLLAMA_BASE_URL=http://host.docker.internal:11434
+#
+# IMPORTANT: On Linux, add to the `api` service:
+#   extra_hosts:
+#     - "host.docker.internal:host-gateway"
+# (This is already included below — uncomment on Linux hosts.)
 # =============================================================================
 
 version: "3.9"
 
+# ---------------------------------------------------------------------------
+# Shared environment — loaded from .env in the project root
+# ---------------------------------------------------------------------------
+x-env: &shared-env
+  env_file:
+    - .env
+
 services:
   # ---------------------------------------------------------------------------
-  # Postgres — primary data store for Phase 4
+  # Postgres
   # ---------------------------------------------------------------------------
-  postgres:
+  db:
     image: postgres:16-alpine
     container_name: routemind_postgres
     restart: unless-stopped
@@ -30,13 +44,64 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      # Auto-run schema.sql on first container creation
       - ./db/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U routemind -d routemind"]
       interval: 5s
       timeout: 5s
       retries: 10
+
+  # ---------------------------------------------------------------------------
+  # FastAPI — LLM Cost Autopilot API
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: routemind_api
+    restart: unless-stopped
+    <<: *shared-env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://routemind:routemind@db:5432/routemind
+      # Ollama runs on the host — reachable via host.docker.internal
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    # Uncomment on Linux (Docker doesn't inject host.docker.internal automatically):
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
+
+  # ---------------------------------------------------------------------------
+  # Streamlit Dashboard (Phase 4)
+  # ---------------------------------------------------------------------------
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: routemind_dashboard
+    restart: unless-stopped
+    <<: *shared-env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://routemind:routemind@db:5432/routemind
+    ports:
+      - "8501:8501"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["streamlit", "run", "dashboard/app.py",
+              "--server.port=8501", "--server.address=0.0.0.0",
+              "--server.headless=true"]
 
 volumes:
   postgres_data:
